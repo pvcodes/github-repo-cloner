@@ -1,68 +1,76 @@
-# v2020.8.108011
-from bs4 import BeautifulSoup
 import requests
 import os
-import subprocess
+from git import Repo
 
+from rich import print
+from rich.console import Console
 
-username = str(input('Enter the github username: '))
+console = Console()
+console._log_render.omit_repeated_times = False
 
-HOMEDIR = os.path.expanduser('~')
+from rich.prompt import Prompt
+from rich.prompt import Confirm
+# name = Prompt.ask("Enter your name", default="Paul Atreides")
+
+# username = str(input("Enter the github username: "))
+username = Prompt.ask("Enter the [bold green]Github Username[/]")
+
+HOMEDIR = os.path.expanduser("~")
 path = HOMEDIR
-tmp = input(f'Path where to save repos (Default: {HOMEDIR}):')
+# tmp = input(f"Path where to save repos (Default: {HOMEDIR}):")
+tmp = Prompt.ask(f"Path where to save repos",default=path)
+
 if tmp:
     path = tmp
-path = os.path.join(path, f'{username}_repos')
+path = os.path.join(path, f"{username}_repos")
 if not os.path.exists(path):
-    print(f'Çreating folder {path}.......')
+    console.log(f"Çreating folder {path}")
     os.mkdir(path)
 
 
-allRepoNames = []
-url = f'https://github.com/{username}?tab=repositories'
+url = f"https://api.github.com/users/{username}/repos"
 
-print('Fetching the repo names.............')
+# print("Fetching the repo names:")
+with console.status("[Working on fetching repositories details]\n", spinner="aesthetic"):
 
+    response = requests.get(url, headers={"Accept": "application/vnd.github.v3+json"})
 
-while True:
+# Getting the repo names
+repos = []
+if response.status_code == 200:
+    res = response.json()
+    console.log(f"Found [b color=cyan]{len(res)}[/    ] repositories.")
+    for i in res:
+        repos.append((i["name"], i["clone_url"]))
 
-    s = requests.get(url)
-    soup = BeautifulSoup(s.text, 'html.parser')
-    a = soup.findAll('h3', {'class': 'wb-break-all'})
-
-    for i in a:
-        tmp = i.find('a')
-        tmp = tmp.text[9:]
-        allRepoNames.append(tmp)
-
-    try:
-        pg = soup.find('div', {'class': 'paginate-container'})
-        next = pg.find('a')
-        url = next['href']
-        if next.text == 'Previous':
-            break
-    except Exception as e:
-        print('--------------------------------------------------\nSome error occured, If the problem persist, please create an issue on https://github.com/pvcodes/github-repo-cloner/issues, explain your issue and copy paste the below error lines...')
-        print(f'{e}\n--------------------------------------------------')
-        break
+else:
+    console.log(f":warning: Failed to fetch repositories. Status code: {response.status_code}")
 
 
-# print(allRepoNames)
+if len(repos) == 0:
+    console.log(":warning: No repositories found or invalid username")
+    console.log(f":warning: Deleting the folder created {path}")
+    os. rmdir(path)
+    exit()
 
-# os.mkdir('repos')
 
+# Clone the repos to the specified path
+os.chdir(path)
+for repo_name, repo_url in repos:
+    repo_path = os.path.join(path, f"{repo_name}")
 
-for reponame in allRepoNames:
-
-    # os.system()
-    repo_path = os.path.join(path, f'{reponame}')
     if os.path.exists(repo_path):
-        p = subprocess.Popen('git pull', cwd=repo_path)
-    else:
-        command = f'git clone https://github.com/{username}/{reponame}'
-        print(command)
-        p = subprocess.Popen(command, cwd=path)
+        console.log(f"[link={repo_url}]{repo_name}[/link] repository exists, pulling changes...")
 
-    print(f'\nCloning {reponame} at {repo_path}....')
-    p.wait()
-    print('\n')
+        repo = Repo(repo_name)
+        origin = repo.remote("origin")
+        origin.pull()
+
+    else:
+        try:
+            console.log(f"Cloning [link={repo_url}]{repo_name}[/link]")
+            repo = Repo.clone_from(repo_url, repo_path)
+            console.log(":100: [bold green]Cloned!![/]")
+        except Exception as e:
+            console.log(f":warning: Failed to clone [link={repo_url}]{repo_name}[/link] at {repo_path}")
+            print(f":x: [bold red]{e}[/]")
